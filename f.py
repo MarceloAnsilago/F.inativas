@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "meu_banco.db"
 PLANILHA_PADRAO = BASE_DIR / "Fichas Inativas Novo.xlsm"
 TABELA = "fichas_inativas"
+EXTENSOES_PLANILHA = {".xlsm", ".xlsx", ".xls"}
 COLUNAS_EXIBICAO = [
     "codigo",
     "nome",
@@ -121,6 +122,28 @@ def carregar_planilha_excel(arquivo) -> pd.DataFrame:
     df = df[df["cpf_digitos"] != ""].copy()
     df = df.drop_duplicates(subset=["cpf_digitos", "nome", "pasta", "numero_ficha"]).reset_index(drop=True)
     return df
+
+
+def listar_planilhas(caminho_informado: str) -> list[Path]:
+    caminho_limpo = caminho_informado.strip().strip('"').strip("'")
+    if not caminho_limpo:
+        return []
+
+    caminho = Path(caminho_limpo).expanduser()
+    if not caminho.exists():
+        raise FileNotFoundError(f"Caminho nao encontrado: {caminho}")
+
+    if caminho.is_file():
+        if caminho.suffix.lower() not in EXTENSOES_PLANILHA:
+            raise ValueError("Informe um arquivo Excel valido (.xlsm, .xlsx ou .xls).")
+        return [caminho]
+
+    planilhas = [
+        arquivo
+        for arquivo in caminho.iterdir()
+        if arquivo.is_file() and arquivo.suffix.lower() in EXTENSOES_PLANILHA
+    ]
+    return sorted(planilhas, key=lambda arquivo: arquivo.name.lower())
 
 
 def salvar_no_banco(df: pd.DataFrame) -> None:
@@ -416,29 +439,54 @@ def render_cards_registro(registro: pd.Series) -> None:
     st.markdown(link_pagina_impressao(registro), unsafe_allow_html=True)
 
 
-def importar_planilha_padrao() -> pd.DataFrame:
-    if not PLANILHA_PADRAO.exists():
-        raise FileNotFoundError(f"Planilha padrao nao encontrada: {PLANILHA_PADRAO.name}")
-    return carregar_planilha_excel(PLANILHA_PADRAO)
-
-
 def render_importacao() -> None:
     st.subheader("Importar planilha para o banco")
-    st.write("A importacao usa a aba `DADOS`, normaliza o cabecalho e grava um SQLite pronto para pesquisa.")
-
-    usar_planilha_local = st.toggle("Usar planilha local padrao", value=True)
-    arquivo = None if usar_planilha_local else st.file_uploader(
-        "Selecione a planilha",
-        type=["xlsm", "xlsx", "xls"],
+    st.write(
+        "Informe uma pasta ou um arquivo Excel do seu computador. "
+        "A importacao usa a aba `DADOS`, normaliza o cabecalho e grava um SQLite pronto para pesquisa."
     )
 
-    origem = PLANILHA_PADRAO.name if usar_planilha_local else getattr(arquivo, "name", None)
-    if origem:
-        st.caption(f"Origem selecionada: {origem}")
+    caminho_inicial = str(PLANILHA_PADRAO.parent if PLANILHA_PADRAO.exists() else BASE_DIR)
+    caminho_informado = st.text_input(
+        "Caminho da pasta ou arquivo",
+        value=caminho_inicial,
+        placeholder=r"Ex.: C:\Users\voce\Desktop\planilhas",
+        help="Se informar uma pasta, o app lista os arquivos Excel encontrados nela.",
+    )
+
+    try:
+        planilhas = listar_planilhas(caminho_informado)
+    except Exception as erro:
+        st.error(f"Falha ao ler o caminho informado: {erro}")
+        return
+
+    if not caminho_informado.strip():
+        st.info("Informe um caminho para localizar as planilhas.")
+        return
+
+    if not planilhas:
+        st.warning("Nenhum arquivo Excel encontrado no caminho informado.")
+        return
+
+    caminho_resolvido = Path(caminho_informado.strip().strip('"').strip("'")).expanduser()
+    if caminho_resolvido.is_file():
+        arquivo_selecionado = planilhas[0]
+        st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
+    else:
+        indice_padrao = 0
+        if PLANILHA_PADRAO in planilhas:
+            indice_padrao = planilhas.index(PLANILHA_PADRAO)
+        arquivo_selecionado = st.selectbox(
+            "Arquivo encontrado",
+            options=planilhas,
+            index=indice_padrao,
+            format_func=lambda arquivo: arquivo.name,
+        )
+        st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
 
     if st.button("Importar para o banco", type="primary", use_container_width=True):
         try:
-            df = importar_planilha_padrao() if usar_planilha_local else carregar_planilha_excel(arquivo)
+            df = carregar_planilha_excel(arquivo_selecionado)
             salvar_no_banco(df)
         except Exception as erro:
             st.error(f"Falha na importacao: {erro}")
