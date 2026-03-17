@@ -1,5 +1,5 @@
 import os
-import base64
+import json
 from html import escape
 from pathlib import Path
 import sqlite3
@@ -360,19 +360,46 @@ def gerar_html_impressao(registro: pd.Series) -> str:
 </html>"""
 
 
-def link_impressao_direta(registro: pd.Series) -> str:
+def render_botao_impressao_direta(registro: pd.Series) -> None:
     html_impressao = gerar_html_impressao(registro)
-    payload = base64.b64encode(html_impressao.encode("utf-8")).decode("ascii")
-    href = f"data:text/html;base64,{payload}"
-    return (
-        '<div style="margin-top: 0.75rem;">'
-        f'<a href="{href}" target="_blank" rel="noopener noreferrer" '
-        'style="display:inline-flex;align-items:center;justify-content:center;'
-        'width:100%;padding:0.65rem 1rem;border-radius:0.75rem;border:1px solid #d1d5db;'
-        'background:#ffffff;color:#111827;text-decoration:none;font-weight:600;">'
-        "Imprimir direto"
-        "</a>"
-        "</div>"
+    payload = json.dumps(html_impressao)
+    components.html(
+        f"""
+        <div style="margin-top: 0.75rem;">
+            <button
+                id="print-btn"
+                type="button"
+                style="display:inline-flex;align-items:center;justify-content:center;
+                width:100%;padding:0.65rem 1rem;border-radius:0.75rem;border:1px solid #d1d5db;
+                background:#ffffff;color:#111827;text-decoration:none;font-weight:600;cursor:pointer;">
+                Imprimir direto
+            </button>
+            <div
+                id="print-error"
+                style="display:none;margin-top:0.5rem;color:#b91c1c;font-size:0.9rem;">
+                O navegador bloqueou a nova janela. Permita pop-ups e tente novamente.
+            </div>
+        </div>
+        <script>
+            const htmlImpressao = {payload};
+            const botao = document.getElementById("print-btn");
+            const erro = document.getElementById("print-error");
+
+            botao.addEventListener("click", function () {{
+                const popup = window.open("about:blank", "_blank");
+                if (!popup) {{
+                    erro.style.display = "block";
+                    return;
+                }}
+
+                popup.document.open();
+                popup.document.write(htmlImpressao);
+                popup.document.close();
+                popup.focus();
+            }});
+        </script>
+        """,
+        height=95,
     )
 
 
@@ -585,7 +612,7 @@ def render_cards_registro(registro: pd.Series) -> None:
                         )
                 st.write(valor_card(valor))
 
-    st.markdown(link_impressao_direta(registro), unsafe_allow_html=True)
+    render_botao_impressao_direta(registro)
 
 
 def render_importacao() -> None:
