@@ -1,3 +1,4 @@
+import os
 from html import escape
 from pathlib import Path
 import sqlite3
@@ -124,14 +125,32 @@ def carregar_planilha_excel(arquivo) -> pd.DataFrame:
     return df
 
 
-def listar_planilhas(caminho_informado: str) -> list[Path]:
+def resolver_caminho_informado(caminho_informado: str) -> Path:
     caminho_limpo = caminho_informado.strip().strip('"').strip("'")
     if not caminho_limpo:
-        return []
+        raise ValueError("Informe uma pasta ou arquivo.")
 
     caminho = Path(caminho_limpo).expanduser()
-    if not caminho.exists():
-        raise FileNotFoundError(f"Caminho nao encontrado: {caminho}")
+    if caminho.exists():
+        return caminho
+
+    # Permite usar um caminho Windows em execucoes locais baseadas em Linux/WSL.
+    if os.name != "nt" and len(caminho_limpo) >= 3 and caminho_limpo[1:3] == ":\\":
+        unidade = caminho_limpo[0].lower()
+        restante = caminho_limpo[3:].replace("\\", "/")
+        caminho_wsl = Path(f"/mnt/{unidade}/{restante}")
+        if caminho_wsl.exists():
+            return caminho_wsl
+        raise FileNotFoundError(
+            "Caminho Windows detectado, mas este ambiente nao consegue acessar o disco local do usuario. "
+            "No Streamlit Cloud use 'Enviar arquivo'."
+        )
+
+    raise FileNotFoundError(f"Caminho nao encontrado: {caminho}")
+
+
+def listar_planilhas(caminho_informado: str) -> list[Path]:
+    caminho = resolver_caminho_informado(caminho_informado)
 
     if caminho.is_file():
         if caminho.suffix.lower() not in EXTENSOES_PLANILHA:
@@ -442,48 +461,78 @@ def render_cards_registro(registro: pd.Series) -> None:
 def render_importacao() -> None:
     st.subheader("Importar planilha para o banco")
     st.write(
-        "Informe uma pasta ou um arquivo Excel do seu computador. "
+        "Escolha se a planilha sera enviada pelo navegador ou lida de um caminho local. "
         "A importacao usa a aba `DADOS`, normaliza o cabecalho e grava um SQLite pronto para pesquisa."
     )
 
-    caminho_inicial = str(PLANILHA_PADRAO.parent if PLANILHA_PADRAO.exists() else BASE_DIR)
-    caminho_informado = st.text_input(
-        "Caminho da pasta ou arquivo",
-        value=caminho_inicial,
-        placeholder=r"Ex.: C:\Users\voce\Desktop\planilhas",
-        help="Se informar uma pasta, o app lista os arquivos Excel encontrados nela.",
+    indice_modo_padrao = 0 if os.name == "nt" else 1
+    modo_importacao = st.radio(
+        "Origem da planilha",
+        options=["Caminho local", "Enviar arquivo"],
+        index=indice_modo_padrao,
+        horizontal=True,
     )
 
-    try:
-        with st.spinner("Localizando planilhas..."):
-            planilhas = listar_planilhas(caminho_informado)
-    except Exception as erro:
-        st.error(f"Falha ao ler o caminho informado: {erro}")
-        return
+    arquivo_selecionado = None
 
-    if not caminho_informado.strip():
-        st.info("Informe um caminho para localizar as planilhas.")
-        return
+    if modo_importacao == "Caminho local":
+        if os.name != "nt":
+            st.info(
+                "Se este app estiver rodando no Streamlit Cloud ou em Linux, um caminho `C:\\...` do seu PC "
+                "nao sera acessivel. Nesses casos, use `Enviar arquivo`."
+            )
 
-    if not planilhas:
-        st.warning("Nenhum arquivo Excel encontrado no caminho informado.")
-        return
-
-    caminho_resolvido = Path(caminho_informado.strip().strip('"').strip("'")).expanduser()
-    if caminho_resolvido.is_file():
-        arquivo_selecionado = planilhas[0]
-        st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
-    else:
-        indice_padrao = 0
-        if PLANILHA_PADRAO in planilhas:
-            indice_padrao = planilhas.index(PLANILHA_PADRAO)
-        arquivo_selecionado = st.selectbox(
-            "Arquivo encontrado",
-            options=planilhas,
-            index=indice_padrao,
-            format_func=lambda arquivo: arquivo.name,
+        caminho_inicial = str(PLANILHA_PADRAO.parent if PLANILHA_PADRAO.exists() else BASE_DIR)
+        caminho_informado = st.text_input(
+            "Caminho da pasta ou arquivo",
+            value=caminho_inicial,
+            placeholder=r"Ex.: C:\Users\voce\Desktop\planilhas",
+            help="Se informar uma pasta, o app lista os arquivos Excel encontrados nela.",
         )
-        st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
+
+        try:
+            with st.spinner("Localizando planilhas..."):
+                planilhas = listar_planilhas(caminho_informado)
+        except Exception as erro:
+            st.error(f"Falha ao ler o caminho informado: {erro}")
+            return
+
+        if not caminho_informado.strip():
+            st.info("Informe um caminho para localizar as planilhas.")
+            return
+
+        if not planilhas:
+            st.warning("Nenhum arquivo Excel encontrado no caminho informado.")
+            return
+
+        caminho_resolvido = resolver_caminho_informado(caminho_informado)
+        if caminho_resolvido.is_file():
+            arquivo_selecionado = planilhas[0]
+            st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
+        else:
+            indice_padrao = 0
+            planilha_padrao_resolvida = PLANILHA_PADRAO.resolve() if PLANILHA_PADRAO.exists() else None
+            if planilha_padrao_resolvida:
+                planilhas_resolvidas = [arquivo.resolve() for arquivo in planilhas]
+                if planilha_padrao_resolvida in planilhas_resolvidas:
+                    indice_padrao = planilhas_resolvidas.index(planilha_padrao_resolvida)
+            arquivo_selecionado = st.selectbox(
+                "Arquivo encontrado",
+                options=planilhas,
+                index=indice_padrao,
+                format_func=lambda arquivo: arquivo.name,
+            )
+            st.caption(f"Arquivo selecionado: {arquivo_selecionado}")
+    else:
+        arquivo_selecionado = st.file_uploader(
+            "Selecione a planilha",
+            type=["xlsm", "xlsx", "xls"],
+        )
+        if arquivo_selecionado is not None:
+            st.caption(f"Arquivo selecionado: {arquivo_selecionado.name}")
+        else:
+            st.info("Envie uma planilha para importar.")
+            return
 
     if st.button("Importar para o banco", type="primary", use_container_width=True):
         try:
