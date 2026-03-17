@@ -173,6 +173,32 @@ def salvar_no_banco(df: pd.DataFrame) -> None:
         conexao.commit()
 
 
+def restaurar_banco_de_snapshot(arquivo_snapshot) -> None:
+    conteudo = arquivo_snapshot.getvalue()
+    if not conteudo:
+        raise ValueError("O arquivo de snapshot esta vazio.")
+
+    caminho_temporario = DB_PATH.with_suffix(".tmp.db")
+    caminho_temporario.write_bytes(conteudo)
+
+    try:
+        with sqlite3.connect(caminho_temporario) as conexao:
+            consulta = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
+            tabela_existe = conexao.execute(consulta, (TABELA,)).fetchone() is not None
+        if not tabela_existe:
+            raise ValueError("O snapshot enviado nao contem a tabela esperada.")
+        caminho_temporario.replace(DB_PATH)
+    finally:
+        if caminho_temporario.exists():
+            caminho_temporario.unlink()
+
+
+def ler_snapshot_banco() -> bytes:
+    if not banco_disponivel():
+        raise FileNotFoundError("Banco nao encontrado para download.")
+    return DB_PATH.read_bytes()
+
+
 def banco_disponivel() -> bool:
     if not DB_PATH.exists():
         return False
@@ -622,6 +648,51 @@ def render_importacao() -> None:
         "Escolha se a planilha sera enviada pelo navegador ou lida de um caminho local. "
         "A importacao usa a aba `DADOS`, normaliza o cabecalho e grava um SQLite pronto para pesquisa."
     )
+
+    st.markdown("### Snapshot do banco")
+    st.caption(
+        "No Streamlit Cloud o disco local e temporario. Depois de importar, baixe um snapshot `.db` "
+        "para restaurar o banco sem precisar reprocessar a planilha."
+    )
+
+    restaurar_coluna, baixar_coluna = st.columns(2)
+    with restaurar_coluna:
+        arquivo_snapshot = st.file_uploader(
+            "Restaurar snapshot SQLite",
+            type=["db", "sqlite", "sqlite3"],
+            key="snapshot_uploader",
+            help="Envie um snapshot do banco ja processado para restaurar a pesquisa rapidamente.",
+        )
+        if st.button("Restaurar banco do snapshot", use_container_width=True):
+            if arquivo_snapshot is None:
+                st.warning("Selecione um arquivo `.db` para restaurar o banco.")
+            else:
+                try:
+                    with st.spinner("Restaurando banco do snapshot..."):
+                        restaurar_banco_de_snapshot(arquivo_snapshot)
+                except Exception as erro:
+                    st.error(f"Falha ao restaurar o snapshot: {erro}")
+                else:
+                    total, atualizado = carregar_resumo_banco()
+                    st.success(f"Snapshot restaurado com {total} registros. Ultima atualizacao: {atualizado}")
+                    st.rerun()
+
+    with baixar_coluna:
+        if banco_disponivel():
+            total, atualizado = carregar_resumo_banco()
+            st.caption(f"Banco atual: {total} registros. Ultima atualizacao: {atualizado}")
+            st.download_button(
+                "Baixar snapshot do banco",
+                data=ler_snapshot_banco(),
+                file_name=f"fichas_inativas_snapshot_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.db",
+                mime="application/octet-stream",
+                use_container_width=True,
+            )
+        else:
+            st.info("Importe ou restaure um banco para habilitar o download do snapshot.")
+
+    st.divider()
+    st.markdown("### Importar da planilha")
 
     indice_modo_padrao = 0 if os.name == "nt" else 1
     modo_importacao = st.radio(
