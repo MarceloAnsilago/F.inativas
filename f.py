@@ -1,5 +1,5 @@
+import base64
 import os
-import json
 from html import escape
 from pathlib import Path
 import sqlite3
@@ -362,7 +362,7 @@ def gerar_html_impressao(registro: pd.Series) -> str:
 
 def render_botao_impressao_direta(registro: pd.Series) -> None:
     html_impressao = gerar_html_impressao(registro)
-    payload = json.dumps(html_impressao)
+    payload = base64.b64encode(html_impressao.encode("utf-8")).decode("ascii")
     components.html(
         f"""
         <div style="margin-top: 0.75rem;">
@@ -381,7 +381,7 @@ def render_botao_impressao_direta(registro: pd.Series) -> None:
             </div>
         </div>
         <script>
-            const htmlImpressao = {payload};
+            const htmlImpressaoBase64 = "{payload}";
             const botao = document.getElementById("print-btn");
             const erro = document.getElementById("print-error");
 
@@ -392,6 +392,7 @@ def render_botao_impressao_direta(registro: pd.Series) -> None:
                     return;
                 }}
 
+                const htmlImpressao = decodeURIComponent(escape(window.atob(htmlImpressaoBase64)));
                 popup.document.open();
                 popup.document.write(htmlImpressao);
                 popup.document.close();
