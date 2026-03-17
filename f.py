@@ -3,7 +3,6 @@ from html import escape
 from pathlib import Path
 import sqlite3
 import unicodedata
-from urllib.parse import urlencode
 
 import pandas as pd
 import streamlit as st
@@ -247,30 +246,26 @@ def exportar_para_pesquisa(valor: object) -> None:
     st.session_state["executar_pesquisa"] = True
 
 
+def abrir_pagina_impressao(registro: pd.Series) -> None:
+    st.query_params.clear()
+    st.query_params["modo"] = "impressao"
+    st.query_params["auto_print"] = "1"
+    for coluna, valor in dados_impressao(registro).items():
+        st.query_params[coluna] = valor
+    st.rerun()
+
+
+def voltar_para_pesquisa() -> None:
+    st.query_params.clear()
+    st.rerun()
+
+
 def pagina_impressao_ativa() -> bool:
     return st.query_params.get("modo") == "impressao"
 
 
 def dados_impressao(registro: pd.Series) -> dict[str, str]:
     return {coluna: valor_card(registro.get(coluna, "")) for _, coluna in COLUNAS_IMPRESSAO}
-
-
-def link_pagina_impressao(registro: pd.Series) -> str:
-    parametros = {"modo": "impressao", "auto_print": "1", **dados_impressao(registro)}
-    href = f'?{urlencode(parametros)}'
-    return (
-        '<div style="margin-top: 0.75rem;">'
-        f"""<button type="button"
-        onclick="(function() {{
-            window.location.href = '{href}';
-        }})();"
-        style="display:inline-flex;align-items:center;justify-content:center;
-        padding:0.6rem 0.9rem;border-radius:0.75rem;border:1px solid #d1d5db;
-        background:#ffffff;color:#111827;text-decoration:none;font-weight:600;cursor:pointer;">
-        Abrir pagina de impressao
-        </button>"""
-        "</div>"
-    )
 
 
 def render_pagina_impressao() -> None:
@@ -384,12 +379,32 @@ def render_pagina_impressao() -> None:
             )
         )
 
+    acao_imprimir, acao_voltar = st.columns([1, 1])
+    with acao_imprimir:
+        if st.button("Imprimir", use_container_width=True):
+            components.html(
+                """
+                <script>
+                    const dispararImpressao = () => {
+                        try {
+                            window.parent.print();
+                        } catch (e) {
+                            window.print();
+                        }
+                    };
+                    setTimeout(dispararImpressao, 150);
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+    with acao_voltar:
+        st.button("Voltar para pesquisa", use_container_width=True, on_click=voltar_para_pesquisa)
+
+    st.caption("Se o navegador nao abrir a impressao automaticamente, use Ctrl+P nessa tela.")
+
     st.markdown(
         (
-            '<div class="print-actions">'
-            '<button class="print-button" onclick="window.print()">Imprimir</button>'
-            '<a class="back-link" href="./" target="_self">Voltar para pesquisa</a>'
-            "</div>"
             '<section class="print-sheet">'
             '<h1 class="print-title">Ficha para impressao</h1>'
             f"<p>{escape(titulo)}</p>"
@@ -402,22 +417,7 @@ def render_pagina_impressao() -> None:
     )
 
     if st.query_params.get("auto_print") == "1":
-        components.html(
-            """
-            <script>
-                const dispararImpressao = () => {
-                    try {
-                        window.parent.print();
-                    } catch (e) {
-                        window.print();
-                    }
-                };
-                setTimeout(dispararImpressao, 300);
-            </script>
-            """,
-            height=0,
-            width=0,
-        )
+        st.info("Pagina de impressao aberta. Se o dialogo nao aparecer, pressione Ctrl+P.")
 
 
 def render_cards_registro(registro: pd.Series) -> None:
@@ -455,7 +455,12 @@ def render_cards_registro(registro: pd.Series) -> None:
                         )
                 st.write(valor_card(valor))
 
-    st.markdown(link_pagina_impressao(registro), unsafe_allow_html=True)
+    if st.button(
+        "Abrir pagina de impressao",
+        key=f'imprimir_{registro["codigo"]}_{registro["numero_ficha"]}',
+        use_container_width=True,
+    ):
+        abrir_pagina_impressao(registro)
 
 
 def render_importacao() -> None:
