@@ -1,4 +1,5 @@
 import os
+import base64
 from html import escape
 from pathlib import Path
 import sqlite3
@@ -246,6 +247,135 @@ def exportar_para_pesquisa(valor: object) -> None:
     st.session_state["executar_pesquisa"] = True
 
 
+def gerar_html_impressao(registro: pd.Series) -> str:
+    dados = dados_impressao(registro)
+    titulo = (
+        f'{dados["nome"]} | CPF {dados["cpf"]} | '
+        f'Ficha {dados["numero_ficha"]} | Pasta {dados["pasta"]}'
+    )
+    cards_html = []
+    for titulo_card, coluna in COLUNAS_IMPRESSAO:
+        classe = "print-card full" if coluna == "endereco" else "print-card"
+        cards_html.append(
+            (
+                f'<div class="{classe}">'
+                f'<p class="print-label">{escape(titulo_card)}</p>'
+                f'<p class="print-value">{escape(dados[coluna])}</p>'
+                "</div>"
+            )
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ficha para impressao</title>
+    <style>
+        body {{
+            margin: 0;
+            background: #f3f4f6;
+            color: #111827;
+            font-family: Arial, sans-serif;
+        }}
+        .page {{
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }}
+        .print-sheet {{
+            border: 1px solid #d1d5db;
+            border-radius: 16px;
+            background: #ffffff;
+            padding: 24px;
+        }}
+        .print-title {{
+            margin: 0 0 16px 0;
+            font-size: 2rem;
+        }}
+        .print-subtitle {{
+            margin: 0 0 20px 0;
+            font-size: 1rem;
+        }}
+        .print-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }}
+        .print-card {{
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 16px;
+            break-inside: avoid;
+        }}
+        .print-card.full {{
+            grid-column: 1 / -1;
+        }}
+        .print-label {{
+            margin: 0 0 8px 0;
+            color: #6b7280;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }}
+        .print-value {{
+            margin: 0;
+            color: #111827;
+            font-size: 1.05rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }}
+        @media print {{
+            body {{
+                background: #ffffff;
+            }}
+            .page {{
+                max-width: 100%;
+                padding: 0;
+            }}
+            .print-sheet {{
+                border: none;
+                border-radius: 0;
+                padding: 0;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="print-sheet">
+            <h1 class="print-title">Ficha para impressao</h1>
+            <p class="print-subtitle">{escape(titulo)}</p>
+            <div class="print-grid">{"".join(cards_html)}</div>
+        </section>
+    </main>
+    <script>
+        window.addEventListener("load", function () {{
+            setTimeout(function () {{
+                window.print();
+            }}, 250);
+        }});
+    </script>
+</body>
+</html>"""
+
+
+def link_impressao_direta(registro: pd.Series) -> str:
+    html_impressao = gerar_html_impressao(registro)
+    payload = base64.b64encode(html_impressao.encode("utf-8")).decode("ascii")
+    href = f"data:text/html;base64,{payload}"
+    return (
+        '<div style="margin-top: 0.75rem;">'
+        f'<a href="{href}" target="_blank" rel="noopener noreferrer" '
+        'style="display:inline-flex;align-items:center;justify-content:center;'
+        'width:100%;padding:0.65rem 1rem;border-radius:0.75rem;border:1px solid #d1d5db;'
+        'background:#ffffff;color:#111827;text-decoration:none;font-weight:600;">'
+        "Imprimir direto"
+        "</a>"
+        "</div>"
+    )
+
+
 def abrir_pagina_impressao(registro: pd.Series) -> None:
     st.query_params.clear()
     st.query_params["modo"] = "impressao"
@@ -455,12 +585,7 @@ def render_cards_registro(registro: pd.Series) -> None:
                         )
                 st.write(valor_card(valor))
 
-    if st.button(
-        "Abrir pagina de impressao",
-        key=f'imprimir_{registro["codigo"]}_{registro["numero_ficha"]}',
-        use_container_width=True,
-    ):
-        abrir_pagina_impressao(registro)
+    st.markdown(link_impressao_direta(registro), unsafe_allow_html=True)
 
 
 def render_importacao() -> None:
