@@ -455,7 +455,8 @@ def render_importacao() -> None:
     )
 
     try:
-        planilhas = listar_planilhas(caminho_informado)
+        with st.spinner("Localizando planilhas..."):
+            planilhas = listar_planilhas(caminho_informado)
     except Exception as erro:
         st.error(f"Falha ao ler o caminho informado: {erro}")
         return
@@ -486,8 +487,9 @@ def render_importacao() -> None:
 
     if st.button("Importar para o banco", type="primary", use_container_width=True):
         try:
-            df = carregar_planilha_excel(arquivo_selecionado)
-            salvar_no_banco(df)
+            with st.spinner("Importando planilha e atualizando banco..."):
+                df = carregar_planilha_excel(arquivo_selecionado)
+                salvar_no_banco(df)
         except Exception as erro:
             st.error(f"Falha na importacao: {erro}")
         else:
